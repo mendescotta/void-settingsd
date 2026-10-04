@@ -13,3 +13,13 @@ default `chronyd,ntpd,openntpd`).
 
 Testing: `void-settingsd --bus session --root DIR --no-auth --persist` under
 `dbus-run-session`; `--root`/`--no-auth` are refused on the system bus.
+
+## timedatectl / hostnamectl / localectl
+
+`void-settingsctl` is a small multi-call client for the three services. Install
+it as `timedatectl`, `hostnamectl` and `localectl` (symlinks) or run
+`void-settingsctl <tool> ...`. Supported: `timedatectl` status, show,
+set-timezone, list-timezones, set-ntp, set-local-rtc; `hostnamectl` status,
+hostname, set-hostname (`--static/--pretty/--transient`), set-icon-name,
+set-chassis, set-deployment, set-location; `localectl` status, list-locales,
+set-locale, set-keymap, set-x11-keymap. Not the full systemd CLIs (no set-time).

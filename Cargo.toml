@@ -1,10 +1,10 @@
 [package]
-name = "void-settingsd"
-version = "0.2.0"
+name = "runit-settingsd"
+version = "0.3.0"
 edition = "2021"
-description = "hostname1, timedate1 and locale1 D-Bus services for Void Linux (runit)"
+description = "hostname1, timedate1 and locale1 D-Bus services for runit-based Linux (Void)"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/mendescotta/void-settingsd"
+repository = "https://github.com/mendescotta/runit-settingsd"
 
 [dependencies]
 zbus = "5"

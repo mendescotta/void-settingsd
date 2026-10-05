@@ -2,7 +2,7 @@
 <!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
 <policyconfig>
-  <vendor>void-settingsd</vendor>
+  <vendor>runit-settingsd</vendor>
 
   <action id="org.freedesktop.hostname1.set-hostname">
     <description>Set hostname</description>

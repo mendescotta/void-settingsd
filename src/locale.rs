@@ -1,5 +1,5 @@
-use crate::auth::{check, io_err, Ctx};
-use crate::files;
+use crate::auth::{check, Ctx};
+use crate::{files, keymap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -10,15 +10,32 @@ use zbus::{fdo, interface, Connection};
 pub struct Locale(pub Arc<Ctx>);
 
 const LOCALE_KEYS: &[&str] = &[
-    "LANG", "LANGUAGE", "LC_CTYPE", "LC_NUMERIC", "LC_TIME", "LC_COLLATE", "LC_MONETARY", "LC_MESSAGES",
-    "LC_PAPER", "LC_NAME", "LC_ADDRESS", "LC_TELEPHONE", "LC_MEASUREMENT", "LC_IDENTIFICATION", "LC_ALL",
+    "LANG",
+    "LANGUAGE",
+    "LC_CTYPE",
+    "LC_NUMERIC",
+    "LC_TIME",
+    "LC_COLLATE",
+    "LC_MONETARY",
+    "LC_MESSAGES",
+    "LC_PAPER",
+    "LC_NAME",
+    "LC_ADDRESS",
+    "LC_TELEPHONE",
+    "LC_MEASUREMENT",
+    "LC_IDENTIFICATION",
+    "LC_ALL",
 ];
 
 pub fn get_locale(root: &Path) -> Vec<String> {
     let p = files::path(root, "/etc/locale.conf");
     LOCALE_KEYS
         .iter()
-        .filter_map(|k| files::env_get(&p, k).filter(|v| !v.is_empty()).map(|v| format!("{k}={v}")))
+        .filter_map(|k| {
+            files::env_get(&p, k)
+                .filter(|v| !v.is_empty())
+                .map(|v| format!("{k}={v}"))
+        })
         .collect()
 }
 
@@ -26,7 +43,9 @@ pub fn parse_assignments(items: &[String]) -> Result<Vec<(String, String)>, Stri
     items
         .iter()
         .map(|i| {
-            let (k, v) = i.split_once('=').ok_or_else(|| format!("Invalid locale assignment '{i}'"))?;
+            let (k, v) = i
+                .split_once('=')
+                .ok_or_else(|| format!("Invalid locale assignment '{i}'"))?;
             if !LOCALE_KEYS.contains(&k) {
                 return Err(format!("Invalid locale variable '{k}'"));
             }
@@ -49,7 +68,11 @@ fn generated(l: &str) -> bool {
     Command::new("locale")
         .arg("-a")
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|x| norm(x) == norm(l)))
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .any(|x| norm(x) == norm(l))
+        })
         .unwrap_or(true)
 }
 
@@ -66,7 +89,11 @@ pub fn set_locale(root: &Path, items: &[String], verify: bool) -> Result<(), Str
     }
     let p = files::path(root, "/etc/locale.conf");
     for k in LOCALE_KEYS {
-        let v = kv.iter().find(|(kk, _)| kk == k).map(|(_, v)| v.as_str()).filter(|v| !v.is_empty());
+        let v = kv
+            .iter()
+            .find(|(kk, _)| kk == k)
+            .map(|(_, v)| v.as_str())
+            .filter(|v| !v.is_empty());
         files::env_set(&p, k, v).map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -79,10 +106,17 @@ pub fn keymap(root: &Path) -> String {
 }
 
 pub fn set_keymap(root: &Path, keymap: &str) -> Result<(), String> {
-    if keymap.chars().any(|c| !(c.is_ascii_alphanumeric() || "-_.".contains(c))) {
+    if keymap
+        .chars()
+        .any(|c| !(c.is_ascii_alphanumeric() || "-_.".contains(c)))
+    {
         return Err(format!("Invalid keymap '{keymap}'"));
     }
-    let v = if keymap.is_empty() { None } else { Some(keymap) };
+    let v = if keymap.is_empty() {
+        None
+    } else {
+        Some(keymap)
+    };
     files::env_set(&files::path(root, "/etc/rc.conf"), "KEYMAP", v).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -112,21 +146,35 @@ pub fn get_x11(root: &Path) -> [String; 4] {
     ["XkbLayout", "XkbModel", "XkbVariant", "XkbOptions"].map(|n| x11_opt(&c, n))
 }
 
-pub fn set_x11(root: &Path, layout: &str, model: &str, variant: &str, options: &str) -> Result<(), String> {
+pub fn set_x11(
+    root: &Path,
+    layout: &str,
+    model: &str,
+    variant: &str,
+    options: &str,
+) -> Result<(), String> {
     for v in [layout, model, variant, options] {
         if v.chars().any(|c| c == '"' || c.is_control()) {
             return Err("Invalid keyboard setting".into());
         }
     }
     let p = x11_file(root);
-    if [layout, model, variant, options].iter().all(|s| s.is_empty()) {
+    if [layout, model, variant, options]
+        .iter()
+        .all(|s| s.is_empty())
+    {
         let _ = std::fs::remove_file(&p);
         return Ok(());
     }
     let mut s = String::from(
-        "# Written by void-settingsd\n\nSection \"InputClass\"\n\tIdentifier \"keyboard\"\n\tMatchIsKeyboard \"on\"\n",
+        "# Written by runit-settingsd\n\nSection \"InputClass\"\n\tIdentifier \"keyboard\"\n\tMatchIsKeyboard \"on\"\n",
     );
-    for (n, v) in [("XkbLayout", layout), ("XkbModel", model), ("XkbVariant", variant), ("XkbOptions", options)] {
+    for (n, v) in [
+        ("XkbLayout", layout),
+        ("XkbModel", model),
+        ("XkbVariant", variant),
+        ("XkbOptions", options),
+    ] {
         if !v.is_empty() {
             s.push_str(&format!("\tOption \"{n}\" \"{v}\"\n"));
         }
@@ -135,6 +183,16 @@ pub fn set_x11(root: &Path, layout: &str, model: &str, variant: &str, options: &
     files::atomic_write(&p, &s).map_err(|e| e.to_string())
 }
 
+impl Locale {
+    async fn emit_x11_changed(&self, em: &SignalEmitter<'_>) -> zbus::Result<()> {
+        self.x11_layout_changed(em).await?;
+        self.x11_model_changed(em).await?;
+        self.x11_variant_changed(em).await?;
+        self.x11_options_changed(em).await
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 #[interface(name = "org.freedesktop.locale1")]
 impl Locale {
     #[zbus(property)]
@@ -175,7 +233,14 @@ impl Locale {
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.locale1.set-locale", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.locale1.set-locale",
+            interactive,
+        )
+        .await?;
         set_locale(&self.0.root, &locale, !self.0.test_mode).map_err(fdo::Error::InvalidArgs)?;
         self.locale_changed(&em).await?;
         Ok(())
@@ -186,15 +251,29 @@ impl Locale {
         &self,
         keymap: String,
         _keymap_toggle: String,
-        _convert: bool,
+        convert: bool,
         interactive: bool,
         #[zbus(connection)] conn: &Connection,
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.locale1.set-keyboard", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.locale1.set-keyboard",
+            interactive,
+        )
+        .await?;
         set_keymap(&self.0.root, &keymap).map_err(fdo::Error::InvalidArgs)?;
         self.v_console_keymap_changed(&em).await?;
+        if convert {
+            if let Some(x) = keymap::console_to_x11(&keymap) {
+                set_x11(&self.0.root, x.layout, x.model, x.variant, x.options)
+                    .map_err(fdo::Error::InvalidArgs)?;
+                self.emit_x11_changed(&em).await?;
+            }
+        }
         Ok(())
     }
 
@@ -205,19 +284,29 @@ impl Locale {
         model: String,
         variant: String,
         options: String,
-        _convert: bool,
+        convert: bool,
         interactive: bool,
         #[zbus(connection)] conn: &Connection,
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.locale1.set-keyboard", interactive).await?;
-        set_x11(&self.0.root, &layout, &model, &variant, &options).map_err(fdo::Error::InvalidArgs)?;
-        self.x11_layout_changed(&em).await?;
-        self.x11_model_changed(&em).await?;
-        self.x11_variant_changed(&em).await?;
-        self.x11_options_changed(&em).await?;
-        let _ = io_err;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.locale1.set-keyboard",
+            interactive,
+        )
+        .await?;
+        set_x11(&self.0.root, &layout, &model, &variant, &options)
+            .map_err(fdo::Error::InvalidArgs)?;
+        self.emit_x11_changed(&em).await?;
+        if convert {
+            if let Some(map) = keymap::x11_to_console(&layout, &variant) {
+                set_keymap(&self.0.root, map).map_err(fdo::Error::InvalidArgs)?;
+                self.v_console_keymap_changed(&em).await?;
+            }
+        }
         Ok(())
     }
 }
@@ -230,8 +319,16 @@ mod tests {
     #[test]
     fn locale_roundtrip() {
         let d = tempfile::tempdir().unwrap();
-        set_locale(d.path(), &["LANG=en_GB.UTF-8".into(), "LC_TIME=et_EE.UTF-8".into()], false).unwrap();
-        assert_eq!(get_locale(d.path()), vec!["LANG=en_GB.UTF-8", "LC_TIME=et_EE.UTF-8"]);
+        set_locale(
+            d.path(),
+            &["LANG=en_GB.UTF-8".into(), "LC_TIME=et_EE.UTF-8".into()],
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            get_locale(d.path()),
+            vec!["LANG=en_GB.UTF-8", "LC_TIME=et_EE.UTF-8"]
+        );
         set_locale(d.path(), &["LANG=C.UTF-8".into()], false).unwrap();
         assert_eq!(get_locale(d.path()), vec!["LANG=C.UTF-8"]);
         assert!(set_locale(d.path(), &["PATH=/x".into()], false).is_err());

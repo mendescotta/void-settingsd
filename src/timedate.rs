@@ -13,11 +13,33 @@ pub struct Timedate(pub Arc<Ctx>);
 const NTP_DEFAULT: &[&str] = &["chronyd", "ntpd", "openntpd"];
 const ZONEINFO: &str = "/usr/share/zoneinfo";
 
+static NTP_OVERRIDE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn set_ntp_override(service: String) {
+    let _ = NTP_OVERRIDE.set(service);
+}
+
+fn config(root: &Path) -> String {
+    let new = files::path(root, "/etc/runit-settingsd.conf");
+    if new.exists() {
+        files::read(&new)
+    } else {
+        files::read(&files::path(root, "/etc/settingsd.conf"))
+    }
+}
+
 fn ntp_candidates(root: &Path) -> Vec<String> {
-    let conf = files::read(&files::path(root, "/etc/settingsd.conf"));
+    if let Some(svc) = NTP_OVERRIDE.get() {
+        return vec![svc.clone()];
+    }
+    let conf = config(root);
     for l in conf.lines() {
         if let Some(v) = l.trim().strip_prefix("ntp-services=") {
-            return v.split([',', ' ']).filter(|s| !s.is_empty()).map(String::from).collect();
+            return v
+                .split([',', ' '])
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect();
         }
     }
     NTP_DEFAULT.iter().map(|s| s.to_string()).collect()
@@ -30,9 +52,11 @@ pub fn installed_ntp(root: &Path) -> Option<String> {
 }
 
 pub fn active_ntp(root: &Path) -> Option<String> {
-    ntp_candidates(root)
-        .into_iter()
-        .find(|s| files::path(root, &format!("/var/service/{s}")).symlink_metadata().is_ok())
+    ntp_candidates(root).into_iter().find(|s| {
+        files::path(root, &format!("/var/service/{s}"))
+            .symlink_metadata()
+            .is_ok()
+    })
 }
 
 pub fn set_ntp(root: &Path, on: bool) -> std::io::Result<()> {
@@ -102,7 +126,10 @@ pub fn set_timezone(root: &Path, tz: &str) -> Result<(), String> {
         return Err(format!("Invalid time zone '{tz}'"));
     }
     let link = files::path(root, "/etc/localtime");
-    let tmp = files::path(root, &format!("/etc/.localtime.settingsd.{}", std::process::id()));
+    let tmp = files::path(
+        root,
+        &format!("/etc/.localtime.settingsd.{}", std::process::id()),
+    );
     let _ = std::fs::remove_file(&tmp);
     symlink(format!("{ZONEINFO}/{tz}"), &tmp).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &link).map_err(|e| e.to_string())?;
@@ -202,7 +229,14 @@ impl Timedate {
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.timedate1.set-timezone", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.timedate1.set-timezone",
+            interactive,
+        )
+        .await?;
         set_timezone(&self.0.root, &timezone).map_err(fdo::Error::InvalidArgs)?;
         self.timezone_changed(&em).await?;
         Ok(())
@@ -218,7 +252,14 @@ impl Timedate {
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.timedate1.set-local-rtc", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.timedate1.set-local-rtc",
+            interactive,
+        )
+        .await?;
         set_local_rtc(&self.0.root, local_rtc).map_err(io_err)?;
         if !self.0.test_mode {
             if fix_system {
@@ -240,7 +281,14 @@ impl Timedate {
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.timedate1.set-ntp", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.timedate1.set-ntp",
+            interactive,
+        )
+        .await?;
         set_ntp(&self.0.root, use_ntp).map_err(|e| fdo::Error::Failed(e.to_string()))?;
         self.n_t_p_changed(&em).await?;
         Ok(())
@@ -255,9 +303,18 @@ impl Timedate {
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.timedate1.set-time", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.timedate1.set-time",
+            interactive,
+        )
+        .await?;
         if active_ntp(&self.0.root).is_some() {
-            return Err(fdo::Error::AccessDenied("Automatic time synchronization is enabled".into()));
+            return Err(fdo::Error::AccessDenied(
+                "Automatic time synchronization is enabled".into(),
+            ));
         }
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -310,7 +367,10 @@ mod tests {
         assert_eq!(timezone(d.path()), "UTC");
         set_timezone(d.path(), "Europe/Tallinn").unwrap();
         assert_eq!(timezone(d.path()), "Europe/Tallinn");
-        assert_eq!(files::env_get(&d.path().join("etc/rc.conf"), "TIMEZONE").unwrap(), "Europe/Tallinn");
+        assert_eq!(
+            files::env_get(&d.path().join("etc/rc.conf"), "TIMEZONE").unwrap(),
+            "Europe/Tallinn"
+        );
         assert!(set_timezone(d.path(), "../etc/passwd").is_err());
         assert!(set_timezone(d.path(), "Nope/Zone").is_err());
         assert!(set_timezone(d.path(), "/UTC").is_err());
@@ -319,7 +379,10 @@ mod tests {
     #[test]
     fn tz_list() {
         let d = root();
-        assert_eq!(list_timezones(d.path()), vec!["Europe/Helsinki_x", "Europe/Tallinn", "UTC"]);
+        assert_eq!(
+            list_timezones(d.path()),
+            vec!["Europe/Helsinki_x", "Europe/Tallinn", "UTC"]
+        );
     }
 
     #[test]
@@ -328,7 +391,10 @@ mod tests {
         assert!(!local_rtc(d.path()));
         set_local_rtc(d.path(), true).unwrap();
         assert!(local_rtc(d.path()));
-        assert_eq!(fs::read_to_string(d.path().join("etc/adjtime")).unwrap(), "0.0 0 0.0\n0\nLOCAL\n");
+        assert_eq!(
+            fs::read_to_string(d.path().join("etc/adjtime")).unwrap(),
+            "0.0 0 0.0\n0\nLOCAL\n"
+        );
         set_local_rtc(d.path(), false).unwrap();
         assert!(!local_rtc(d.path()));
     }

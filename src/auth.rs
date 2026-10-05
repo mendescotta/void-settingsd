@@ -6,6 +6,7 @@ use zbus::{fdo, Connection};
 pub struct Ctx {
     pub root: std::path::PathBuf,
     pub no_auth: bool,
+    pub read_only: bool,
     pub test_mode: bool,
     pub last_activity: std::sync::atomic::AtomicU64,
 }
@@ -33,6 +34,11 @@ pub async fn check(
     interactive: bool,
 ) -> fdo::Result<()> {
     ctx.touch();
+    if ctx.read_only {
+        return Err(fdo::Error::NotSupported(
+            "runit-settingsd is running in read-only mode".into(),
+        ));
+    }
     if ctx.no_auth {
         return Ok(());
     }

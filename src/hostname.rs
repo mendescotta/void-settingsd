@@ -26,20 +26,31 @@ impl Hostname {
             .map(|_| ())
     }
     fn dmi(&self, f: &str) -> String {
-        files::read(&files::path(&self.0.root, &format!("/sys/class/dmi/id/{f}")))
-            .trim()
-            .to_string()
+        files::read(&files::path(
+            &self.0.root,
+            &format!("/sys/class/dmi/id/{f}"),
+        ))
+        .trim()
+        .to_string()
     }
     fn os_release(&self, key: &str) -> String {
         let r = files::path(&self.0.root, "/etc/os-release");
-        let r = if r.exists() { r } else { files::path(&self.0.root, "/usr/lib/os-release") };
+        let r = if r.exists() {
+            r
+        } else {
+            files::path(&self.0.root, "/usr/lib/os-release")
+        };
         files::env_get(&r, key).unwrap_or_default()
     }
     fn uname(&self, f: fn(&libc::utsname) -> &[libc::c_char]) -> String {
         let mut u: libc::utsname = unsafe { std::mem::zeroed() };
         unsafe { libc::uname(&mut u) };
         let s = f(&u);
-        let bytes: Vec<u8> = s.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
+        let bytes: Vec<u8> = s
+            .iter()
+            .take_while(|&&c| c != 0)
+            .map(|&c| c as u8)
+            .collect();
         String::from_utf8_lossy(&bytes).into_owned()
     }
     fn live_hostname(&self) -> String {
@@ -52,7 +63,8 @@ pub fn valid_hostname(h: &str) -> bool {
         && h.len() <= 64
         && !h.starts_with(['.', '-'])
         && !h.ends_with(['.', '-'])
-        && h.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+        && h.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
 }
 
 #[interface(name = "org.freedesktop.hostname1")]
@@ -96,7 +108,9 @@ impl Hostname {
         }
         match self.dmi("chassis_type").as_str() {
             "8" | "9" | "10" | "14" => "laptop".into(),
-            "3" | "4" | "5" | "6" | "7" | "13" | "15" | "16" | "23" | "24" | "35" => "desktop".into(),
+            "3" | "4" | "5" | "6" | "7" | "13" | "15" | "16" | "23" | "24" | "35" => {
+                "desktop".into()
+            }
             "11" => "handset".into(),
             "30" => "tablet".into(),
             "17" | "25" | "28" | "29" => "server".into(),
@@ -145,12 +159,25 @@ impl Hostname {
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.hostname1.set-hostname", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.hostname1.set-hostname",
+            interactive,
+        )
+        .await?;
         if !hostname.is_empty() && !valid_hostname(&hostname) {
-            return Err(fdo::Error::InvalidArgs(format!("Invalid hostname '{hostname}'")));
+            return Err(fdo::Error::InvalidArgs(format!(
+                "Invalid hostname '{hostname}'"
+            )));
         }
         if !self.0.test_mode {
-            let name = if hostname.is_empty() { self.static_name() } else { hostname };
+            let name = if hostname.is_empty() {
+                self.static_name()
+            } else {
+                hostname
+            };
             let rc = unsafe { libc::sethostname(name.as_ptr().cast(), name.len()) };
             if rc != 0 {
                 return Err(io_err(std::io::Error::last_os_error()));
@@ -168,9 +195,18 @@ impl Hostname {
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.hostname1.set-static-hostname", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.hostname1.set-static-hostname",
+            interactive,
+        )
+        .await?;
         if !hostname.is_empty() && !valid_hostname(&hostname) {
-            return Err(fdo::Error::InvalidArgs(format!("Invalid hostname '{hostname}'")));
+            return Err(fdo::Error::InvalidArgs(format!(
+                "Invalid hostname '{hostname}'"
+            )));
         }
         let p = files::path(&self.0.root, "/etc/hostname");
         if hostname.is_empty() {
@@ -190,7 +226,14 @@ impl Hostname {
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.hostname1.set-machine-info", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.hostname1.set-machine-info",
+            interactive,
+        )
+        .await?;
         self.set_info("PRETTY_HOSTNAME", &hostname)?;
         self.pretty_hostname_changed(&em).await?;
         Ok(())
@@ -204,7 +247,14 @@ impl Hostname {
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.hostname1.set-machine-info", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.hostname1.set-machine-info",
+            interactive,
+        )
+        .await?;
         self.set_info("ICON_NAME", &icon)?;
         self.icon_name_changed(&em).await?;
         Ok(())
@@ -218,12 +268,31 @@ impl Hostname {
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.hostname1.set-machine-info", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.hostname1.set-machine-info",
+            interactive,
+        )
+        .await?;
         const OK: &[&str] = &[
-            "", "desktop", "laptop", "convertible", "server", "tablet", "handset", "watch", "embedded", "vm", "container",
+            "",
+            "desktop",
+            "laptop",
+            "convertible",
+            "server",
+            "tablet",
+            "handset",
+            "watch",
+            "embedded",
+            "vm",
+            "container",
         ];
         if !OK.contains(&chassis.as_str()) {
-            return Err(fdo::Error::InvalidArgs(format!("Invalid chassis '{chassis}'")));
+            return Err(fdo::Error::InvalidArgs(format!(
+                "Invalid chassis '{chassis}'"
+            )));
         }
         self.set_info("CHASSIS", &chassis)?;
         self.chassis_changed(&em).await?;
@@ -238,7 +307,14 @@ impl Hostname {
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.hostname1.set-machine-info", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.hostname1.set-machine-info",
+            interactive,
+        )
+        .await?;
         self.set_info("DEPLOYMENT", &deployment)?;
         self.deployment_changed(&em).await?;
         Ok(())
@@ -252,7 +328,14 @@ impl Hostname {
         #[zbus(header)] hdr: Header<'_>,
         #[zbus(signal_emitter)] em: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
-        check(&self.0, conn, &hdr, "org.freedesktop.hostname1.set-machine-info", interactive).await?;
+        check(
+            &self.0,
+            conn,
+            &hdr,
+            "org.freedesktop.hostname1.set-machine-info",
+            interactive,
+        )
+        .await?;
         self.set_info("LOCATION", &location)?;
         self.location_changed(&em).await?;
         Ok(())

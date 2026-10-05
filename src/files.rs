@@ -33,29 +33,52 @@ fn unquote(v: &str) -> String {
     let v = v.trim();
     let b = v.as_bytes();
     if b.len() >= 2 && (b[0] == b'"' || b[0] == b'\'') && b[b.len() - 1] == b[0] {
-        v[1..v.len() - 1].replace("\\\"", "\"").replace("\\\\", "\\")
+        v[1..v.len() - 1]
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
     } else {
         v.to_string()
     }
 }
 
 fn quote(v: &str) -> String {
-    if v.chars().all(|c| c.is_ascii_alphanumeric() || "._-/:@+,".contains(c)) {
+    if v.chars()
+        .all(|c| c.is_ascii_alphanumeric() || "._-/:@+,".contains(c))
+    {
         v.to_string()
     } else {
         format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\""))
     }
 }
 
+fn assignment(line: &str) -> Option<(&str, &str, &str)> {
+    let l = line.trim();
+    if l.starts_with('#') {
+        return None;
+    }
+    let (prefix, rest) = match l.strip_prefix("export ") {
+        Some(r) => ("export ", r.trim_start()),
+        None => ("", l),
+    };
+    let (k, v) = rest.split_once('=')?;
+    Some((prefix, k.trim(), v))
+}
+
+fn quotes_balanced(v: &str) -> bool {
+    let v = v.trim();
+    match v.chars().next() {
+        Some(q @ ('"' | '\'')) => {
+            v.len() >= 2 && v.ends_with(q) && !v[..v.len() - 1].ends_with('\\')
+        }
+        _ => true,
+    }
+}
+
 pub fn env_get(path: &Path, key: &str) -> Option<String> {
     let mut found = None;
     for line in read(path).lines() {
-        let l = line.trim();
-        if l.starts_with('#') {
-            continue;
-        }
-        if let Some((k, v)) = l.split_once('=') {
-            if k.trim() == key {
+        if let Some((_, k, v)) = assignment(line) {
+            if k == key {
                 found = Some(unquote(v));
             }
         }
@@ -71,12 +94,19 @@ pub fn env_set(path: &Path, key: &str, value: Option<&str>) -> io::Result<bool> 
     let mut out = Vec::new();
     let mut done = false;
     for line in old.lines() {
-        let l = line.trim();
-        let is_key = !l.starts_with('#')
-            && l.split_once('=').map(|(k, _)| k.trim() == key).unwrap_or(false);
-        if is_key {
+        let hit = assignment(line).filter(|(_, k, _)| *k == key);
+        if let Some((prefix, _, raw)) = hit {
+            if !quotes_balanced(raw) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "refusing to modify {}: {key} is not a simple assignment",
+                        path.display()
+                    ),
+                ));
+            }
             if let (Some(v), false) = (value, done) {
-                out.push(format!("{}={}", key, quote(v)));
+                out.push(format!("{prefix}{key}={}", quote(v)));
                 done = true;
             }
         } else {
@@ -117,6 +147,19 @@ mod tests {
         assert_eq!(env_get(&p, "PRETTY").as_deref(), Some("My Laptop \"x\""));
         env_set(&p, "KEYMAP", None).unwrap();
         assert_eq!(env_get(&p, "KEYMAP"), None);
+    }
+
+    #[test]
+    fn env_handles_export_and_refuses_multiline() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("rc.conf");
+        fs::write(&p, "export KEYMAP=us\n").unwrap();
+        assert_eq!(env_get(&p, "KEYMAP").as_deref(), Some("us"));
+        env_set(&p, "KEYMAP", Some("de")).unwrap();
+        assert_eq!(read(&p), "export KEYMAP=de\n");
+        fs::write(&p, "KEYMAP=\"a\nb\"\n").unwrap();
+        assert!(env_set(&p, "KEYMAP", Some("de")).is_err());
+        assert_eq!(read(&p), "KEYMAP=\"a\nb\"\n");
     }
 
     #[test]

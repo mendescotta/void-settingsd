@@ -20,7 +20,7 @@ fn usage(tool: &str) -> ! {
         "timedatectl" => "timedatectl [status|show|set-timezone TZ|list-timezones|set-ntp BOOL|set-local-rtc BOOL]",
         "hostnamectl" => "hostnamectl [status|hostname [NAME]|set-hostname [--static|--pretty|--transient] NAME|set-icon-name|set-chassis|set-deployment|set-location VALUE]",
         "localectl" => "localectl [status|list-locales|set-locale VAR=VALUE...|set-keymap MAP|set-x11-keymap LAYOUT [MODEL [VARIANT [OPTIONS]]]]",
-        _ => "void-settingsctl timedatectl|hostnamectl|localectl [args]\n(or invoke through a timedatectl/hostnamectl/localectl symlink)",
+        _ => "runit-settingsctl timedatectl|hostnamectl|localectl [args]\n(or invoke through a timedatectl/hostnamectl/localectl symlink)",
     };
     eprintln!("{text}");
     exit(2);
@@ -35,7 +35,9 @@ fn parse_bool(s: &str) -> R<bool> {
 }
 
 fn arg<'a>(args: &'a [String], i: usize, tool: &str) -> &'a str {
-    args.get(i).map(String::as_str).unwrap_or_else(|| usage(tool))
+    args.get(i)
+        .map(String::as_str)
+        .unwrap_or_else(|| usage(tool))
 }
 
 fn fmt_time(usec: u64, utc: bool) -> String {
@@ -63,7 +65,11 @@ fn fmt_time(usec: u64, utc: bool) -> String {
 }
 
 fn yes(b: bool) -> &'static str {
-    if b { "yes" } else { "no" }
+    if b {
+        "yes"
+    } else {
+        "no"
+    }
 }
 
 fn timedatectl(c: &Connection, args: &[String]) -> R<()> {
@@ -82,7 +88,16 @@ fn timedatectl(c: &Connection, args: &[String]) -> R<()> {
             println!("                 RTC time: {}", fmt_time(rtc, true));
             println!("                Time zone: {tz}");
             println!("System clock synchronized: {}", yes(sync));
-            println!("              NTP service: {}", if !can { "n/a" } else if ntp { "active" } else { "inactive" });
+            println!(
+                "              NTP service: {}",
+                if !can {
+                    "n/a"
+                } else if ntp {
+                    "active"
+                } else {
+                    "inactive"
+                }
+            );
             println!("          RTC in local TZ: {}", yes(local));
         }
         "show" => {
@@ -94,14 +109,22 @@ fn timedatectl(c: &Connection, args: &[String]) -> R<()> {
                 println!("{k}={}", fmt_time(p.get_property::<u64>(k)?, false));
             }
         }
-        "set-timezone" => p.call_method("SetTimezone", &(arg(args, 1, "timedatectl"), true))?.body().deserialize::<()>()?,
+        "set-timezone" => p
+            .call_method("SetTimezone", &(arg(args, 1, "timedatectl"), true))?
+            .body()
+            .deserialize::<()>()?,
         "list-timezones" => {
             let l: Vec<String> = p.call("ListTimezones", &())?;
             println!("{}", l.join("\n"));
         }
         "set-ntp" => p.call("SetNTP", &(parse_bool(arg(args, 1, "timedatectl"))?, true))?,
-        "set-local-rtc" => p.call("SetLocalRTC", &(parse_bool(arg(args, 1, "timedatectl"))?, false, true))?,
-        "set-time" => return Err("set-time is not supported (void-settingsd has no SetTime)".into()),
+        "set-local-rtc" => p.call(
+            "SetLocalRTC",
+            &(parse_bool(arg(args, 1, "timedatectl"))?, false, true),
+        )?,
+        "set-time" => {
+            return Err("set-time is not supported (runit-settingsd has no SetTime)".into())
+        }
         _ => usage("timedatectl"),
     }
     Ok(())
@@ -177,8 +200,17 @@ fn localectl(c: &Connection, args: &[String]) -> R<()> {
         "status" => {
             let l: Vec<String> = p.get_property("Locale")?;
             let s = |k: &str| p.get_property::<String>(k).unwrap_or_default();
-            let or_unset = |v: String| if v.is_empty() { "(unset)".to_string() } else { v };
-            println!("   System Locale: {}", l.first().map(String::as_str).unwrap_or("n/a"));
+            let or_unset = |v: String| {
+                if v.is_empty() {
+                    "(unset)".to_string()
+                } else {
+                    v
+                }
+            };
+            println!(
+                "   System Locale: {}",
+                l.first().map(String::as_str).unwrap_or("n/a")
+            );
             for x in l.iter().skip(1) {
                 println!("                  {x}");
             }
@@ -201,7 +233,13 @@ fn localectl(c: &Connection, args: &[String]) -> R<()> {
             }
             let items: Vec<String> = args[1..]
                 .iter()
-                .map(|a| if a.contains('=') { a.clone() } else { format!("LANG={a}") })
+                .map(|a| {
+                    if a.contains('=') {
+                        a.clone()
+                    } else {
+                        format!("LANG={a}")
+                    }
+                })
                 .collect();
             p.call("SetLocale", &(items, true))?
         }
@@ -212,7 +250,10 @@ fn localectl(c: &Connection, args: &[String]) -> R<()> {
         }
         "set-x11-keymap" => {
             let g = |i| args.get(i).map(String::as_str).unwrap_or("");
-            p.call("SetX11Keyboard", &(arg(args, 1, "localectl"), g(2), g(3), g(4), false, true))?
+            p.call(
+                "SetX11Keyboard",
+                &(arg(args, 1, "localectl"), g(2), g(3), g(4), false, true),
+            )?
         }
         _ => usage("localectl"),
     }

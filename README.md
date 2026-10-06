@@ -1,7 +1,5 @@
 # runit-settingsd
 
-> Formerly `void-settingsd`. The package `runit-settingsd` replaces it; the legacy config name `/etc/settingsd.conf` is still read.
-
 `org.freedesktop.hostname1`, `timedate1` and `locale1` D-Bus services for Void
 Linux (runit), so GNOME, Cinnamon, KDE and COSMIC settings panels can change
 the hostname, timezone, NTP, RTC mode, locale and keyboard layout without
